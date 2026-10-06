@@ -55,8 +55,6 @@ app.post('/api/reset', async (req: Request, res: Response) => {
     await client.query('BEGIN');
     await client.query('DELETE FROM orders');
     await client.query('DELETE FROM payments');
-    
-    // Sabhi units ko wapas AVAILABLE karo
     await client.query("UPDATE inventory_units SET status = 'AVAILABLE', reserved_by = NULL");
     await client.query('COMMIT');
 
@@ -69,8 +67,7 @@ app.post('/api/reset', async (req: Request, res: Response) => {
     client.release();
   }
 });
-
-// 4. Naive Endpoint (Buggy Check-Then-Act pattern)
+// 4. Naive Endpoint (Fixed: 1000ms delay to simulate real checkout race window)
 app.post('/api/checkout/naive', async (req: Request, res: Response) => {
   const { productId, userId } = req.body;
   const client = await pool.connect();
@@ -84,21 +81,24 @@ app.post('/api/checkout/naive', async (req: Request, res: Response) => {
     const available = parseInt(stockRes.rows[0].count, 10);
 
     if (available > 0) {
-      // Artificial delay (network latency / payment I/O simulate karne ke liye)
-      await new Promise((r) => setTimeout(r, 60));
+      // 1000ms delay: ensures all remote DB connections connect and enter race window
+      await new Promise((r) => setTimeout(r, 1000));
 
-      // Step B: Update stock & place order without DB-level row locks
+      // Step B: Vulnerable Check-Then-Act update without row locks
       await client.query(
         "UPDATE inventory_units SET status = 'SOLD', reserved_by = $1 WHERE product_id = $2 AND status = 'AVAILABLE'",
         [userId, productId]
       );
 
+      // Order created regardless of whether update actually claimed a unit
       await client.query(
         'INSERT INTO orders (user_id, product_id, amount) VALUES ($1, $2, 120000)',
         [userId, productId]
       );
 
       broadcastEvent('ORDER_PLACED', { type: 'NAIVE_SUCCESS', userId });
+      broadcastEvent('STOCK_UPDATE', { availableStock: 0 });
+
       return res.json({ success: true, message: 'Order Placed (Naive)' });
     }
 
