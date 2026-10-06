@@ -32,77 +32,70 @@ Traditional e-commerce engines often fall into two traps:
 ## 🗺️ System Flowchart & Architecture Diagram
 
 ```mermaid
-flowchart TB
+flowchart LR
     %% ==========================================
-    %% COLOR SCHEMES FOR SCREENSHOTS
+    %% PREMIUM COLOR PALETTES FOR SCREENSHOTS
     %% ==========================================
-    classDef clientStyle fill:#0f172a,stroke:#38bdf8,stroke-width:2.5px,color:#f8fafc;
-    classDef switchStyle fill:#1e1b4b,stroke:#a855f7,stroke-width:2.5px,color:#f8fafc;
-    classDef dangerStyle fill:#4c0519,stroke:#f43f5e,stroke-width:2.5px,color:#fff1f2;
-    classDef successStyle fill:#064e3b,stroke:#10b981,stroke-width:2.5px,color:#ecfdf5;
-    classDef refundStyle fill:#451a03,stroke:#f59e0b,stroke-width:2.5px,color:#fffbeb;
-    classDef dbStyle fill:#172554,stroke:#3b82f6,stroke-width:2.5px,color:#eff6ff;
-    classDef sseStyle fill:#134e4a,stroke:#14b8a6,stroke-width:2.5px,color:#f0fdfa;
+    classDef traffic fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef router fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#f8fafc;
+    classDef naive fill:#450a0a,stroke:#f43f5e,stroke-width:2px,color:#fff1f2;
+    classDef secure fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ecfdf5;
+    classDef refund fill:#451a03,stroke:#f59e0b,stroke-width:2px,color:#fffbeb;
+    classDef db fill:#172554,stroke:#3b82f6,stroke-width:2px,color:#eff6ff;
+    classDef telemetry fill:#134e4a,stroke:#14b8a6,stroke-width:2px,color:#f0fdfa;
 
     %% ==========================================
-    %% TOP LAYER: CONCURRENT TRAFFIC
+    %% LEFT: TRAFFIC & ROUTING
     %% ==========================================
-    subgraph TRAFFIC_LAYER["🛒 TRAFFIC SURGE (Chaos Simulator)"]
+    subgraph TRAFFIC["🛒 1. TRAFFIC SURGE"]
         direction TB
-        BUYERS["⚡ 15 Simultaneous Flash Sale Buyers<br/>Parallel HTTP POST Requests (Big Billion Surge)"]:::clientStyle
-        ROUTER{"🔀 API Checkout Router"}:::switchStyle
+        BUYERS["👥 15 Concurrent Buyers<br/>⚡ Parallel POST Requests<br/>Target: 1 iPhone in Stock"]:::traffic
+        ROUTER{"🔀 API Checkout Router<br/>Mode Selection"}:::router
         BUYERS --> ROUTER
     end
 
     %% ==========================================
-    %% MIDDLE LAYER: COMPARISON PIPELINES
+    %% TOP LANE: NAIVE TOCTOU VULNERABILITY
     %% ==========================================
-    subgraph ARCHITECTURE["⚖️ CONCURRENCY ARCHITECTURE COMPARISON"]
-        
-        %% LEFT LANE: NAIVE PATH
-        subgraph LANE_A["❌ PATH A: NAIVE CHECK-THEN-ACT (TOCTOU)"]
-            direction TB
-            A1["1️⃣ Read Stock: SELECT COUNT(*)<br/>All 15 threads read Stock = 1"]:::dangerStyle
-            A2["⏳ Network / I/O Latency Window<br/>Simulated 1000ms delay"]:::dangerStyle
-            A3["2️⃣ Blind UPDATE inventory_units<br/>No row-level locking semantics"]:::dangerStyle
-            A4["💥 OVERSOLD DISASTER (-14 Deficit)<br/>15 Orders Minted for 1 iPhone!"]:::dangerStyle
-            A1 --> A2 --> A3 --> A4
-        end
-
-        %% RIGHT LANE: FLASHLOCK PATH
-        subgraph LANE_B["🛡️ PATH B: FLASHLOCK ENGINE (Shopify + Flipkart Model)"]
-            direction TB
-            B1["🔑 Idempotency Guard (Deduplicate)"]:::successStyle
-            B2["📦 PostgreSQL Unit-Pool Query<br/>SELECT id FROM inventory_units<br/>WHERE status = 'AVAILABLE' LIMIT 1<br/>FOR UPDATE SKIP LOCKED;"]:::dbStyle
-            
-            subgraph OUTCOMES["⚡ Zero-Contention Non-Blocking Split"]
-                direction LR
-                WIN["🏆 Buyer #1 (Winner)<br/>✅ Unit marked 'SOLD'<br/>💳 ₹1,20,000 Captured<br/>🧾 Order #1 Created"]:::successStyle
-                LOSE["💸 Buyers #2..15 (Losing)<br/>⚡ 0ms DB Thread Lock Wait<br/>🔄 100% Instant Auto-Refund<br/>🚫 HTTP 409 Out of Stock"]:::refundStyle
-            end
-
-            B1 --> B2
-            B2 -->|"Row Acquired"| WIN
-            B2 -->|"Row Skipped"| LOSE
-        end
-    end
-
-    %% ==========================================
-    %% BOTTOM LAYER: REAL-TIME TELEMETRY
-    %% ==========================================
-    subgraph TELEMETRY["📡 REAL-TIME EVENT STREAM (Server-Sent Events)"]
+    subgraph LANE_A["❌ PATH A: NAIVE CHECK-THEN-ACT (TOCTOU BUG)"]
         direction LR
-        SSE["📢 EventSource Dispatcher<br/>STOCK_UPDATE • ORDER_PLACED • REFUND_ISSUED"]:::sseStyle
-        DASH["🖥️ Live React Chaos Dashboard<br/>Real-Time Terminal Feed • Total Wall Time: ~312ms"]:::sseStyle
-        SSE --> DASH
+        N1["🔍 1. Read Stock<br/>SELECT COUNT(*)<br/>All 15 see Stock = 1"]:::naive
+        N2["⏳ 2. I/O Latency<br/>1000ms delay window<br/>Race condition opens"]:::naive
+        N3["📝 3. Blind UPDATE<br/>UPDATE inventory_units<br/>No row locking"]:::naive
+        N4["🚨 OVERSOLD BUG<br/>💥 15 Orders Placed!<br/>(-14 Unit Deficit)"]:::naive
+        N1 --> N2 --> N3 --> N4
     end
 
-    ROUTER -->|"POST /api/checkout/naive"| LANE_A
-    ROUTER -->|"POST /api/checkout/secure"| LANE_B
+    %% ==========================================
+    %% BOTTOM LANE: FLASHLOCK PRODUCTION ENGINE
+    %% ==========================================
+    subgraph LANE_B["🛡️ PATH B: FLASHLOCK UNIT-POOL (SHOPIFY + FLIPKART)"]
+        direction LR
+        B1["🔑 1. Idempotency Guard<br/>Deduplicate retries<br/>Prevent double-charges"]:::secure
+        B2["📦 2. Postgres Unit-Pool<br/>SELECT id FROM units<br/>FOR UPDATE SKIP LOCKED;"]:::db
+        B3["⚡ 3. Atomic Claim<br/>Winner locks Unit #1<br/>14 skip with 0ms wait!"]:::secure
+        B4["🏆 4. Order & Refund<br/>✅ 1 Order Minted (₹1.2L)<br/>💸 14 Instant Auto-Refunds"]:::refund
+        B1 --> B2 --> B3 --> B4
+    end
 
-    A4 -.-> SSE
-    WIN -.-> SSE
-    LOSE -.-> SSE
+    %% ==========================================
+    %% RIGHT: REAL-TIME TELEMETRY
+    %% ==========================================
+    subgraph TELEMETRY["📡 3. REAL-TIME TELEMETRY"]
+        direction TB
+        SSE["📢 SSE Broadcast Stream<br/>STOCK_UPDATE • ORDER • REFUND"]:::telemetry
+        UI["🖥️ React Live Chaos Dashboard<br/>Terminal Feed • Wall Time ~312ms"]:::telemetry
+        SSE --> UI
+    end
+
+    %% ==========================================
+    %% CONNECTING PIPELINES
+    %% ==========================================
+    ROUTER -->|"❌ /api/checkout/naive"| N1
+    ROUTER -->|"🛡️ /api/checkout/secure"| B1
+
+    N4 --> SSE
+    B4 --> SSE
 ```
 
 ---
